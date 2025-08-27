@@ -87,170 +87,223 @@
   </div>
 
   <script>
-    // ======= CONFIGURE THIS =======
-    const FLOW_URL = "https://script.google.com/a/macros/fau.edu/s/AKfycbzPSQg0vgj1pBKJ-uO-ytChdfoUKeCr0FV5yxNvccR-iyh-ROqphJdvrPn-jB7zWAJw/exec"; // paste your Flow's POST URL
-    // ===============================
+  // ======= BACKEND CONFIG =======
+  // Choose where to save responses:
+  //   - 'power_automate'  → Excel via a Power Automate HTTP-trigger flow (requires premium HTTP trigger)
+  //   - 'nocodeapi'       → Google Sheets via NoCodeAPI (free tier available)
+  const BACKEND_TYPE = 'nocodeapi'; // change to 'nocodeapi' if using Google Sheets
 
-    const GPU_GROUPS = [
-      { label: "NVIDIA Data Center", items: [
-        "H200 SXM (141GB)",
-        "H100 SXM (80GB)",
-        "H100 PCIe (80GB)",
-        "A100 SXM (80GB)",
-        "A100 PCIe (40GB)",
-        "L40S (48GB)",
-        "RTX 6000 Ada (48GB)",
-        "A40 (48GB)",
-        "A30 (24GB)",
-        "A10 (24GB)"
-      ]},
-      { label: "AMD Data Center", items: [
-        "MI300X (192GB)",
-        "MI300A (128GB)",
-        "MI250 (128GB)"
-      ]},
-      { label: "Other / Edge", items: [
-        "Grace Hopper GH200",
-        "Consumer RTX 4090 (24GB)",
-        "Other (specify in Notes)"
-      ]}
-    ];
+  // Set this to your endpoint URL depending on BACKEND_TYPE:
+  // Power Automate: paste your Flow's POST URL (When an HTTP request is received)
+  // NoCodeAPI (Google Sheets): e.g. https://v1.nocodeapi.com/<you>/googlesheets/<token>?tabId=Responses
+  const FLOW_URL = 'https://v1.nocodeapi.com/jacobeurglunes/google_sheets/nYgFqREeMbkYalpK';
+  // ===============================
 
-    const rowsEl = document.getElementById('rows');
-    const totalEl = document.getElementById('total');
-    const form = document.getElementById('survey-form');
-    const msgEl = document.getElementById('msg');
+  // === If using NoCodeAPI (Google Sheets), your sheet tab should have this header row:
+  // Timestamp | Name | Email | Organization | Use Case | Selections (JSON) | Total GPUs | Notes
 
-    function makeSelect(id){
-      const sel = document.createElement('select');
-      sel.id = id;
-      sel.required = true;
-      GPU_GROUPS.forEach(g=>{
-        const og = document.createElement('optgroup');
-        og.label = g.label;
-        g.items.forEach(item=>{
-          const opt = document.createElement('option');
-          opt.value = item; opt.textContent = item; og.appendChild(opt);
-        });
-        sel.appendChild(og);
+  const GPU_GROUPS = [
+    { label: "NVIDIA Data Center", items: [
+      "H200 SXM (141GB)",
+      "H100 SXM (80GB)",
+      "H100 PCIe (80GB)",
+      "A100 SXM (80GB)",
+      "A100 PCIe (40GB)",
+      "L40S (48GB)",
+      "RTX 6000 Ada (48GB)",
+      "A40 (48GB)",
+      "A30 (24GB)",
+      "A10 (24GB)"
+    ]},
+    { label: "AMD Data Center", items: [
+      "MI300X (192GB)",
+      "MI300A (128GB)",
+      "MI250 (128GB)"
+    ]},
+    { label: "Other / Edge", items: [
+      "Grace Hopper GH200",
+      "Consumer RTX 4090 (24GB)",
+      "Other (specify in Notes)"
+    ]}
+  ];
+
+  const rowsEl = document.getElementById('rows');
+  const totalEl = document.getElementById('total');
+  const form = document.getElementById('survey-form');
+  const msgEl = document.getElementById('msg');
+
+  function makeSelect(id){
+    const sel = document.createElement('select');
+    sel.id = id;
+    sel.required = true;
+    GPU_GROUPS.forEach(g=>{
+      const og = document.createElement('optgroup');
+      og.label = g.label;
+      g.items.forEach(item=>{
+        const opt = document.createElement('option');
+        opt.value = item; opt.textContent = item; og.appendChild(opt);
       });
-      const placeholder = document.createElement('option');
-      placeholder.value = ""; placeholder.textContent = "Select a GPU…"; placeholder.selected = true; placeholder.disabled = true;
-      sel.insertBefore(placeholder, sel.firstChild);
-      return sel;
-    }
-
-    function makeQtyInput(id){
-      const inp = document.createElement('input');
-      inp.type = 'number'; inp.min = '0'; inp.step = '1'; inp.placeholder = '0'; inp.id = id;
-      inp.addEventListener('input', updateTotal);
-      return inp;
-    }
-
-    function rowTemplate(index){
-      const row = document.createElement('div');
-      row.className = 'row'; row.dataset.index = index;
-
-      // GPU select
-      const gWrap = document.createElement('div');
-      const gLabel = document.createElement('label'); gLabel.textContent = 'GPU model'; gLabel.setAttribute('for', `gpu-${index}`);
-      const gSel = makeSelect(`gpu-${index}`);
-      gWrap.appendChild(gLabel); gWrap.appendChild(gSel);
-
-      // Qty
-      const qWrap = document.createElement('div');
-      const qLabel = document.createElement('label'); qLabel.textContent = 'Quantity'; qLabel.setAttribute('for', `qty-${index}`);
-      const qInp = makeQtyInput(`qty-${index}`);
-      qWrap.appendChild(qLabel); qWrap.appendChild(qInp);
-
-      // Remove button
-      const bWrap = document.createElement('div');
-      const btn = document.createElement('button');
-      btn.type = 'button'; btn.className = 'btn danger'; btn.textContent = 'Remove';
-      btn.addEventListener('click', ()=>{ row.remove(); updateTotal(); });
-      bWrap.appendChild(btn);
-
-      row.appendChild(gWrap); row.appendChild(qWrap); row.appendChild(bWrap);
-      return row;
-    }
-
-    function addRow(){
-      const idx = rowsEl.children.length;
-      rowsEl.appendChild(rowTemplate(idx));
-    }
-
-    function updateTotal(){
-      let sum = 0;
-      [...rowsEl.querySelectorAll("input[id^='qty-']")].forEach(inp=>{
-        const v = parseInt(inp.value||'0',10); if(Number.isFinite(v)) sum += v;
-      });
-      totalEl.textContent = String(sum);
-    }
-
-    function getSelections(){
-      const selections = [];
-      [...rowsEl.children].forEach(row=>{
-        const sel = row.querySelector('select');
-        const qty = row.querySelector('input');
-        const model = sel.value; const q = parseInt(qty.value||'0',10);
-        if(model && q>0) selections.push({ model, qty: q });
-      });
-      return selections;
-    }
-
-    function setMessage(kind, text){
-      msgEl.className = kind === 'error' ? 'error' : 'success';
-      msgEl.textContent = text;
-    }
-
-    // Init
-    document.getElementById('add-row').addEventListener('click', addRow);
-    document.getElementById('reset-btn').addEventListener('click', ()=>{
-      form.reset(); rowsEl.innerHTML=''; addRow(); updateTotal(); msgEl.textContent=''; msgEl.className='';
+      sel.appendChild(og);
     });
-    addRow();
+    const placeholder = document.createElement('option');
+    placeholder.value = ""; placeholder.textContent = "Select a GPU…"; placeholder.selected = true; placeholder.disabled = true;
+    sel.insertBefore(placeholder, sel.firstChild);
+    return sel;
+  }
 
-    // Submit handler
-    document.getElementById('submit-btn').addEventListener('click', async()=>{
-      msgEl.textContent=''; msgEl.className='';
-      const name = document.getElementById('name').value.trim();
-      const email = document.getElementById('email').value.trim();
-      if(!name){ setMessage('error','Please enter your name.'); return; }
-      if(!email){ setMessage('error','Please enter a contact email.'); return; }
-      const selections = getSelections();
-      if(selections.length===0){ setMessage('error','Select at least one GPU with quantity > 0.'); return; }
-      const payload = {
-        submittedAt: new Date().toISOString(),
-        respondent: {
-          name,
-          email,
-          org: document.getElementById('org').value.trim(),
-          useCase: document.getElementById('usecase').value.trim(),
-          notes: document.getElementById('notes').value.trim()
-        },
-        selections,
-        totals: { totalGPUs: selections.reduce((s,r)=>s+r.qty,0) }
-      };
-      if(!FLOW_URL || FLOW_URL.includes('YOUR-POWER-AUTOMATE-FLOW-POST-URL')){
-        setMessage('error','Configure FLOW_URL at the top of the file first.');
-        return;
-      }
-      try{
-        const res = await fetch(FLOW_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },   // <-- key change
-        body: JSON.stringify(payload)
-      });
+  function makeQtyInput(id){
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = '0'; inp.step = '1'; inp.placeholder = '0'; inp.id = id;
+    inp.addEventListener('input', updateTotal);
+    return inp;
+  }
 
-        if(!res.ok){
-          const txt = await res.text().catch(()=> '');
-          throw new Error(`HTTP ${res.status} ${txt}`);
-        }
-        setMessage('success','Thanks! Your response was recorded. You can close this tab.');
-      }catch(err){
-        setMessage('error',`Submission failed: ${err.message}`);
-      }
+  function rowTemplate(index){
+    const row = document.createElement('div');
+    row.className = 'row'; row.dataset.index = index;
+
+    const gWrap = document.createElement('div');
+    const gLabel = document.createElement('label'); gLabel.textContent = 'GPU model'; gLabel.setAttribute('for', `gpu-${index}`);
+    const gSel = makeSelect(`gpu-${index}`);
+    gWrap.appendChild(gLabel); gWrap.appendChild(gSel);
+
+    const qWrap = document.createElement('div');
+    const qLabel = document.createElement('label'); qLabel.textContent = 'Quantity'; qLabel.setAttribute('for', `qty-${index}`);
+    const qInp = makeQtyInput(`qty-${index}`);
+    qWrap.appendChild(qLabel); qWrap.appendChild(qInp);
+
+    const bWrap = document.createElement('div');
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'btn danger'; btn.textContent = 'Remove';
+    btn.addEventListener('click', ()=>{ row.remove(); updateTotal(); });
+    bWrap.appendChild(btn);
+
+    row.appendChild(gWrap); row.appendChild(qWrap); row.appendChild(bWrap);
+    return row;
+  }
+
+  function addRow(){
+    const idx = rowsEl.children.length;
+    rowsEl.appendChild(rowTemplate(idx));
+  }
+
+  function updateTotal(){
+    let sum = 0;
+    [...rowsEl.querySelectorAll("input[id^='qty-']")].forEach(inp=>{
+      const v = parseInt(inp.value||'0',10); if(Number.isFinite(v)) sum += v;
     });
-  </script>
+    totalEl.textContent = String(sum);
+  }
+
+  function getSelections(){
+    const selections = [];
+    [...rowsEl.children].forEach(row=>{
+      const sel = row.querySelector('select');
+      const qty = row.querySelector('input');
+      const model = sel.value; const q = parseInt(qty.value||'0',10);
+      if(model && q>0) selections.push({ model, qty: q });
+    });
+    return selections;
+  }
+
+  function setMessage(kind, text){
+    msgEl.className = kind === 'error' ? 'error' : 'success';
+    msgEl.textContent = text;
+  }
+
+  // === Submission backends ===
+  async function submitToPowerAutomate(payload){
+    // Use text/plain to avoid CORS preflight in some setups
+    const res = await fetch(FLOW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
+    });
+    return res.ok;
+  }
+
+  async function submitToNoCodeAPI(payload){
+    const row = [[
+      new Date().toISOString(),
+      payload.respondent.name,
+      payload.respondent.email,
+      payload.respondent.org,
+      payload.respondent.useCase,
+      JSON.stringify(payload.selections),
+      payload.totals.totalGPUs,
+      payload.respondent.notes
+    ]];
+    const res = await fetch(FLOW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: row })
+    });
+    return res.ok;
+  }
+
+  async function submitPayload(payload){
+    if(!FLOW_URL || FLOW_URL.includes('YOUR-FLOW-OR-NOCODEAPI-ENDPOINT-HERE')){
+      setMessage('error','Configure FLOW_URL at the top of the file first.');
+      return false;
+    }
+    if(BACKEND_TYPE === 'power_automate'){
+      return submitToPowerAutomate(payload);
+    } else if (BACKEND_TYPE === 'nocodeapi'){
+      return submitToNoCodeAPI(payload);
+    } else {
+      setMessage('error','Unknown BACKEND_TYPE.');
+      return false;
+    }
+  }
+
+  // Init
+  document.getElementById('add-row').addEventListener('click', addRow);
+  document.getElementById('reset-btn').addEventListener('click', ()=>{
+    form.reset(); rowsEl.innerHTML=''; addRow(); updateTotal(); msgEl.textContent=''; msgEl.className='';
+  });
+  addRow();
+
+  // Submit handler
+  const submitBtn = document.getElementById('submit-btn');
+  document.getElementById('submit-btn').addEventListener('click', async()=>{
+    if (submitBtn.disabled) return;
+    msgEl.textContent=''; msgEl.className='';
+
+    const name = document.getElementById('name').value.trim();
+    const email = document.getElementById('email').value.trim();
+    if(!name){ setMessage('error','Please enter your name.'); return; }
+    if(!email){ setMessage('error','Please enter a contact email.'); return; }
+    const selections = getSelections();
+    if(selections.length===0){ setMessage('error','Select at least one GPU with quantity > 0.'); return; }
+
+    const payload = {
+      submittedAt: new Date().toISOString(),
+      respondent: {
+        name,
+        email,
+        org: document.getElementById('org').value.trim(),
+        useCase: document.getElementById('usecase').value.trim(),
+        notes: document.getElementById('notes').value.trim()
+      },
+      selections,
+      totals: { totalGPUs: selections.reduce((s,r)=>s+r.qty,0) }
+    };
+
+    submitBtn.disabled = true; const original = submitBtn.textContent; submitBtn.textContent = 'Submitting…';
+    try{
+      const ok = await submitPayload(payload);
+      if(ok){
+        setMessage('success','Thanks! Your response was recorded.');
+      }else{
+        setMessage('error','Submission failed.');
+      }
+    }catch(err){
+      setMessage('error',`Submission failed: ${err.message}`);
+    }finally{
+      submitBtn.disabled = false; submitBtn.textContent = original;
+    }
+  });
+</script>
 </body>
 </html>
+
